@@ -1,0 +1,94 @@
+
+==========================================================================
+实验 8  系统级余量预算
+==========================================================================
+目标: 把抖动、噪声、ISI 换算成「眼高/眼宽」, 看整条链路还剩多少余量
+用法: 先读『先猜』, 自己想一个答案, 再看『实测』和『解释』。
+
+--- 8.1 浴盆曲线: 时间余量 ---
+  [实测] BER<1e-6 的相位窗口: 有 DFE 0.750 UI, 无 DFE 0.675 UI
+  [实测] 理想 NRZ (无限带宽) 的理论上限是 1.0 UI; 本链路只发挥了 75%
+  [实测] 已保存: D:\github\Serdes\nrz\output\lab\lab08_bathtub.png
+  [先猜] 为什么两端会冲到 0.5 (瞎猜) 而不是慢慢变差?
+  [解释] 因为采样点移出眼图后, 判决值与当前比特几乎无关, 只剩随机的 ±1 —— BER 就饱和在 0.5。浴盆的「盆壁」之所以很陡, 是因为眼图边沿的斜率有限, 一旦越过边界就迅速失效。
+
+--- 8.2 发送端抖动 (RJ) 如何吃掉水平余量 ---
++---------------+------------+----------+---------------+----------+
+| rj_sigma [UI] | z 眼高 [V] | CDR 相位 | CDR 抖动 [UI] | BER      |
++---------------+------------+----------+---------------+----------+
+| 0.00          | +1.147     | -0.035   | 0.0353        | 0.00e+00 |
+| 0.02          | +1.098     | -0.047   | 0.0358        | 0.00e+00 |
+| 0.05          | +0.924     | -0.047   | 0.0440        | 0.00e+00 |
+| 0.10          | +0.460     | -0.059   | 0.0581        | 3.16e-03 |
+| 0.15          | +0.101     | -0.062   | 0.0789        | 1.63e-02 |
++---------------+------------+----------+---------------+----------+
+  [先猜] 抖动加在发送端, 为什么 CDR 的相位抖动也跟着变大?
+  [解释] 抖动让每个边沿的位置随机偏移。bang-bang 鉴相器看到的是'边沿偏了', 它无法区分这是时钟偏了还是数据边沿本身就抖 —— 于是把抖动当成相位误差去追, 相位跟着一起抖。这就是为什么 CDR 需要**低带宽**环路: 让它跟踪慢漂移 (ppm), 而不去追快抖动。
+
+  >> 笔记: 经验值: 一个健康的链路, 抖动 + 噪声 + ISI 总预算里, 水平余量通常要求留 0.2~0.3 UI 给 CDR 跟踪误差。
+
+--- 8.3 噪声如何吃掉垂直余量 ---
++------------+------------+------------+-----------+----------+
+| 噪声 sigma | z 眼高 [V] | z 厚度 [V] | 眼高/厚度 | BER      |
++------------+------------+------------+-----------+----------+
+| 0.04       | +1.043     | 1.043      | 1.0       | 0.00e+00 |
+| 0.06       | +0.928     | 1.175      | 0.8       | 0.00e+00 |
+| 0.08       | +0.792     | 1.335      | 0.6       | 2.63e-04 |
+| 0.10       | +0.656     | 1.527      | 0.4       | 2.37e-03 |
+| 0.12       | +0.434     | 1.733      | 0.3       | 5.53e-03 |
++------------+------------+------------+-----------+----------+
+  [先猜] 为什么 BER 对噪声的敏感度是指数级的?
+  [解释] 判决错误 = 噪声把采样点推过门限。高斯尾概率 Q(x) ~ exp(-x^2/2), 所以眼高每减小一点, BER 会按指数掉。工程上用「眼高 = 12σ」对应 BER~1e-16 (Q(6)) 来做预算。
+  [注意] 本模型没有建模确定性抖动 (DJ)、占空比失真 (DCD) 和电源噪声, 真实链路的噪声「厚度」会明显比这里大。
+
+--- 8.4 眼高阶梯: 每一级损失了多少 ---
++-----------------------+--------------+----------+
+| 阶段                  | 垂直眼高 [V] | 占理想值 |
++-----------------------+--------------+----------+
+| TX 输出 (理想 ±1)     | +2.000       | 100%     |
+| TX FFE 后 (Σtaps=0.5) | +1.000       | 50%      |
+| 信道输出              | +0.175       | 9%       |
+| CTLE 后 (未归一)      | +0.260       | 13%      |
+| AGC 归一化后          | +1.114       | 56%      |
+| DFE 后 (判决器输入)   | +1.147       | 57%      |
++-----------------------+--------------+----------+
+  [先猜] AGC 把幅度从 0.9 拉回 1.1, 是「赚」了吗?
+  [解释] 不是。AGC 是无差别放大: 信号和噪声同乘一个系数, 眼高和厚度一起变大, **信噪比不变**。它真正的价值是让后面自适应算法的动态范围固定下来 (Stage 5), 而不是改善链路质量。所以「眼高」必须和「厚度」一起看。
+  [实测] 已保存: D:\github\Serdes\nrz\output\lab\lab08_ladder.png
+
+==========================================================================
+Stage 8 小结
+==========================================================================
+  1. 链路能力 = 垂直余量 (眼高/噪声) x 水平余量 (眼宽/抖动), 缺一不可。
+  2. 浴盆曲线 = 水平余量的直接读数; BER 在两端饱和到 0.5 是正常现象。
+  3. 发送端 RJ 会被 CDR 部分"追"进去, 所以 CDR 必须是低带宽环路。
+  4. BER 对噪声是指数的 (Q 函数), 眼高预算常用 "12 sigma" 作为 1e-16 的判据。
+  5. AGC 把幅度拉回来不等于改善 SNR: 信号和噪声一起放大。看指标要成对看。
+
+  到这里 NRZ 链路的主干就走完了。下一步可以:
+    - 回看 02 的眼图与 08 的浴盆, 把它们和笔记里的"预算表"对起来;
+    - 进 pam4_adc/, 看同样的数学在 PAM4 + ADC 架构里怎么变形。
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.
+Font 'default' does not have a glyph for '\u2212' [U+2212], substituting with a dummy symbol.

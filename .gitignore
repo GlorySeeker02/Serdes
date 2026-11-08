@@ -1,0 +1,9 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+
+# matplotlib 字体缓存 (运行时生成)
+**/.mpl/
+
+# 临时调试/计时脚本 (下划线开头, 只在本地用)
+nrz/_*.py

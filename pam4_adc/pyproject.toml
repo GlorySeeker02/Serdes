@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pam4-adc-model"
+version = "0.1.0"
+description = "PAM4 ADC-based SerDes behavioral model for teaching (numpy-only core)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.6"]
+dev = ["pytest>=7.0", "matplotlib>=3.6"]
+
+[tool.setuptools.packages.find]
+include = ["pam4_model*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
