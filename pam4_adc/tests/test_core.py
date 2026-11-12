@@ -4,6 +4,7 @@
 """
 import sys
 import traceback
+from dataclasses import replace
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -55,6 +56,29 @@ def test_channel_dc_gain():
 def test_channel_nyquist_loss():
     H = channel_transfer(np.array([5e9]), 12.0, 5e9, 0.5)
     assert abs(abs(H[0]) - 10 ** (-12.0 / 20.0)) < 1e-9
+
+
+def test_channel_xtalk_decorrelated_from_data():
+    """串扰必须是独立码型: 与主数据不相关。
+
+    攻击源序列若与主数据同初态、同阶数, LFSR 就会生成完全相同的序列,
+    相加只是把主信号放大了一点 (眼图反而变好)。这里从波形层面检查:
+    "注入的串扰分量" 与 "干净数据波形" 的相关系数应接近 0。
+    """
+    p = PAM4Params()
+    p.n_symbols = 512
+    p.channel_type = "ideal"        # 只观察串扰本身, 排除信道滤波
+    p.channel_noise_sigma = 0.0
+    tx = Transmitter(p)
+    wave, _ = tx.transmit(tx.generate_bits())
+
+    clean = apply_channel(wave, p.dt, replace(p, channel_xtalk_amp=0.0))
+    xtalked = apply_channel(wave, p.dt, replace(p, channel_xtalk_amp=0.3))
+    xt = xtalked - clean
+    assert np.abs(xt).max() > 0.1, "串扰没有真正注入"
+
+    r = float(np.corrcoef(xt, clean)[0, 1])
+    assert abs(r) < 0.2, f"串扰与主数据相关系数 {r:.3f}, 它只是主数据的相干副本"
 
 
 # ---------------- ADC ----------------

@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from .signals import bits_to_nrz, prbs_bits
+from .params import PAM4_LEVELS
+from .signals import bits_to_pam4, prbs_bits, symbols_to_nrz
 
 
 def channel_transfer(freqs, loss_db_at_nyquist, nyquist_hz, skin_ratio=0.5):
@@ -34,12 +35,19 @@ def apply_channel(wave, dt, params, rng=None):
                              params.nyquist_ghz * 1e9, params.channel_skin_db_ratio)
         out = np.fft.irfft(np.fft.rfft(wave) * H, n=n)
 
+    # 串扰: 用一路独立的 PAM4 邻道信号模拟耦合 (峰值 = channel_xtalk_amp)
+    # 注意: 主数据也是 prbs_bits(n_symbols*2, 同阶数), LFSR 初态相同 -> 若攻击源
+    # 直接按 2 比特/符号做 Gray 映射, 两条序列会逐符号完全相同, 相加只是把主信号
+    # 放大 (眼图反而变好), 完全失去串扰的物理意义。所以在自身周期内旋转偶数个
+    # 比特 (= 整数个符号), 保证与主数据不相关 (同谱、不同码型)。
     if params.channel_xtalk_amp > 0:
-        nbits = int(np.ceil(n / params.samples_per_ui))
-        cbits = prbs_bits(nbits, params.prbs_order)
-        xtalk = bits_to_nrz(cbits, params.samples_per_ui,
-                            rise_ui=params.nrz_rise_ui,
-                            swing=params.channel_xtalk_amp)
+        nsym = int(np.ceil(n / params.samples_per_ui))
+        cbits = prbs_bits(nsym * 2, params.prbs_order)
+        shift = max(2, ((2 ** params.prbs_order) // 3) // 2 * 2)
+        csyms = bits_to_pam4(np.roll(cbits, shift))
+        csyms = csyms * (params.channel_xtalk_amp / PAM4_LEVELS[-1])
+        xtalk = symbols_to_nrz(csyms, params.samples_per_ui,
+                               rise_ui=params.nrz_rise_ui)
         out = out + xtalk[:n]
 
     if params.channel_noise_sigma > 0:
